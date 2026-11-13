@@ -6,6 +6,8 @@ terraform.tfvars
 backend.hcl
 crash.log
 crash.*.log
+tfplan
+*.tfplan
 # .terraform.lock.hcl is intentionally committed.
 
 # Ansible
