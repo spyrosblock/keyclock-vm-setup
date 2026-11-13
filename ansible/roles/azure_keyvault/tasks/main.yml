@@ -1,0 +1,45 @@
+---
+- name: Get Key Vault access token from IMDS (managed identity)
+  ansible.builtin.uri:
+    url: "{{ azure_keyvault_imds_token_url }}"
+    method: GET
+    headers:
+      Metadata: "true"
+    return_content: true
+    status_code: 200
+  register: azure_keyvault_token
+  until: azure_keyvault_token.status == 200 and (azure_keyvault_token.json.access_token | default('') | length > 0)
+  retries: "{{ azure_keyvault_retries }}"
+  delay: 15
+  no_log: true
+
+- name: Read secrets from Key Vault
+  ansible.builtin.uri:
+    url: "https://{{ key_vault_name }}.vault.azure.net/secrets/{{ item }}?api-version={{ azure_keyvault_api_version }}"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ azure_keyvault_token.json.access_token }}"
+    return_content: true
+    status_code: 200
+  loop: "{{ azure_keyvault_secret_names }}"
+  register: azure_keyvault_responses
+  # 403 while RBAC propagates, DNS/connection errors right after creation.
+  until: azure_keyvault_responses.status | default(0) == 200
+  retries: "{{ azure_keyvault_retries }}"
+  delay: "{{ azure_keyvault_delay }}"
+  no_log: true
+
+- name: Store secrets as facts
+  ansible.builtin.set_fact:
+    azure_keyvault_secrets: >-
+      {{ dict(azure_keyvault_responses.results | map(attribute='item')
+              | zip(azure_keyvault_responses.results | map(attribute='json') | map(attribute='value'))) }}
+  no_log: true
+
+- name: Assert all secrets are non-empty
+  ansible.builtin.assert:
+    that:
+      - azure_keyvault_secrets[item] | length > 0
+    fail_msg: "Key Vault secret '{{ item }}' is empty"
+    quiet: true
+  loop: "{{ azure_keyvault_secret_names }}"

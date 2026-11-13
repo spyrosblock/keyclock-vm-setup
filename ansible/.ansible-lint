@@ -1,0 +1,6 @@
+---
+profile: production
+exclude_paths:
+  - .cache/
+# Inventory is supplied on the command line (`-i localhost,`) by ansible-pull.
+offline: true

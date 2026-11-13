@@ -1,0 +1,73 @@
+---
+- name: Install certbot
+  ansible.builtin.apt:
+    name: certbot
+    state: present
+    lock_timeout: 600
+
+- name: Enable certbot renewal timer
+  ansible.builtin.systemd_service:
+    name: certbot.timer
+    enabled: true
+    state: started
+
+- name: Check for an existing certificate
+  ansible.builtin.stat:
+    path: "{{ certbot_cert_dir }}/fullchain.pem"
+  register: certbot_cert
+
+- name: Obtain the initial certificate
+  when: not certbot_cert.stat.exists
+  block:
+    # The public IP is only reported by IMDS for a NIC-attached public IP;
+    # if it is empty we only wait for the name to resolve at all.
+    - name: Look up this VM's public IP from IMDS
+      ansible.builtin.uri:
+        url: http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/publicIpAddress?api-version=2021-02-01&format=text
+        headers:
+          Metadata: "true"
+        return_content: true
+      register: certbot_imds_ip
+      failed_when: false
+
+    - name: Remember the public IP
+      ansible.builtin.set_fact:
+        certbot_public_ip: "{{ (certbot_imds_ip.content | default('') | trim) if certbot_imds_ip.status | default(0) == 200 else '' }}"
+
+    # Avoids burning Let's Encrypt failed-validation rate limits while the
+    # DNS record is still propagating.
+    - name: Wait for the domain to resolve to this VM
+      ansible.builtin.command:
+        argv: [getent, ahostsv4, "{{ domain }}"]
+      register: certbot_dns
+      changed_when: false
+      failed_when: false
+      until: certbot_dns.rc == 0 and (certbot_public_ip | length == 0 or certbot_public_ip in certbot_dns.stdout.split())
+      retries: "{{ certbot_dns_retries }}"
+      delay: "{{ certbot_dns_delay }}"
+
+    - name: Fail if DNS is not ready yet (retried on the next run)
+      ansible.builtin.fail:
+        msg: "{{ domain }} does not resolve to {{ certbot_public_ip | default('anything', true) }} yet; not requesting a certificate."
+      when: not (certbot_dns.rc == 0 and (certbot_public_ip | length == 0 or certbot_public_ip in certbot_dns.stdout.split()))
+
+    - name: Request certificate with certbot standalone
+      ansible.builtin.command:
+        argv: "{{ certbot_argv + (['--test-cert'] if certbot_staging else []) }}"
+        creates: "{{ certbot_cert_dir }}/fullchain.pem"
+      vars:
+        certbot_argv:
+          - certbot
+          - certonly
+          - --standalone
+          - --non-interactive
+          - --agree-tos
+          - --keep-until-expiring
+          - -m
+          - "{{ letsencrypt_email }}"
+          - -d
+          - "{{ domain }}"
+          - --pre-hook
+          - "{{ certbot_pre_hook }}"
+          - --post-hook
+          - "{{ certbot_post_hook }}"

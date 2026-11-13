@@ -1,0 +1,96 @@
+---
+- name: Remove conflicting distro container packages
+  ansible.builtin.apt:
+    name: "{{ docker_conflicting_packages }}"
+    state: absent
+    lock_timeout: 600
+
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download Docker apt signing key
+  ansible.builtin.get_url:
+    url: "{{ docker_apt_key_url }}"
+    dest: "{{ docker_apt_key_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+  register: docker_key
+  retries: 5
+  delay: 10
+  until: docker_key is succeeded
+
+- name: Add Docker apt repository (deb822)
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.sources
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible
+      Types: deb
+      URIs: {{ docker_apt_repo_url }}
+      Suites: {{ ansible_facts['distribution_release'] }}
+      Components: stable
+      Architectures: {{ docker_apt_arch_map[ansible_facts['architecture']] | default(ansible_facts['architecture']) }}
+      Signed-By: {{ docker_apt_key_path }}
+  register: docker_repo
+
+- name: Gather installed packages
+  ansible.builtin.package_facts:
+
+# Refresh the cache when the repo was just added, and also whenever Docker is
+# not fully installed yet (e.g. a previous run failed after adding the repo).
+- name: Install Docker CE
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: "{{ docker_repo is changed or (docker_packages | difference(ansible_facts.packages.keys()) | length > 0) }}"
+    lock_timeout: 600
+  register: docker_install
+  retries: 5
+  delay: 30
+  until: docker_install is succeeded
+
+- name: Ensure /etc/docker exists
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Configure Docker daemon (log rotation)
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ docker_daemon_config | to_nice_json }}\n"
+  vars:
+    docker_daemon_config:
+      log-driver: json-file
+      log-opts:
+        max-size: "{{ docker_log_max_size }}"
+        max-file: "{{ docker_log_max_file }}"
+  notify: Restart docker
+
+- name: Enable and start Docker
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - containerd
+    - docker
+
+# Apply daemon.json now rather than at the end of the play, so containers
+# created later in this run already pick up the log settings.
+- name: Flush Docker handlers
+  ansible.builtin.meta: flush_handlers

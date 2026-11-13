@@ -1,0 +1,127 @@
+---
+# Configures the SMTP server of keycloak_realm through kcadm.sh inside the
+# keycloak container. Authenticates as the bootstrap admin from Key Vault.
+# NOTE: KC_BOOTSTRAP_ADMIN_* creates a *temporary* admin (Keycloak shows a
+# warning until a permanent admin exists). If that user is replaced or its
+# password changed in the UI, keep the keycloak-admin-password secret in sync,
+# or this role cannot log in.
+
+- name: Find the keycloak container
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -p
+      - "{{ compose_project_name }}"
+      - -f
+      - "{{ stack_dir }}/docker-compose.yml"
+      - ps
+      - --quiet
+      - keycloak
+  register: keycloak_smtp_container
+  changed_when: false
+  until: keycloak_smtp_container.stdout | trim | length > 0
+  retries: 12
+  delay: 5
+
+- name: Wait for Keycloak to become healthy
+  ansible.builtin.command:
+    argv:
+      - docker
+      - inspect
+      - "{{ keycloak_smtp_container.stdout | trim }}"
+  register: keycloak_smtp_health
+  changed_when: false
+  until: >-
+    keycloak_smtp_health.rc == 0 and
+    (keycloak_smtp_health.stdout | from_json)[0].State.Health.Status | default('') == 'healthy'
+  retries: "{{ keycloak_smtp_wait_retries }}"
+  delay: "{{ keycloak_smtp_wait_delay }}"
+
+# Credentials are passed as environment variables (docker exec -e NAME copies
+# the value from the caller's environment), never on a command line.
+- name: Read current SMTP settings
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - -e
+      - KCADM_USER
+      - -e
+      - KCADM_PW
+      - "{{ keycloak_smtp_container.stdout | trim }}"
+      - bash
+      - -c
+      - >-
+        {{ keycloak_smtp_kcadm }} get realms/{{ keycloak_realm }}
+        --no-config --server {{ keycloak_smtp_server_url }} --realm master
+        --user "$KCADM_USER" --password "$KCADM_PW"
+    # Keep "$KCADM_*" literal so bash inside the container expands it; by
+    # default the command module would substitute it on the host (leaking the
+    # password into the docker exec argv and mangling any "$" it contains).
+    expand_argument_vars: false
+  environment:
+    KCADM_USER: "{{ keycloak_admin_user }}"
+    KCADM_PW: "{{ keycloak_admin_password }}"
+  register: keycloak_smtp_current
+  changed_when: false
+  # Right after becoming healthy the admin login can still fail briefly.
+  until: keycloak_smtp_current.rc == 0
+  retries: 6
+  delay: 10
+  no_log: true
+
+- name: Read stamp of last applied SMTP config
+  ansible.builtin.slurp:
+    src: "{{ keycloak_smtp_stamp_file }}"
+  register: keycloak_smtp_stamp
+  failed_when: false
+
+- name: Decide whether SMTP settings need updating
+  ansible.builtin.set_fact:
+    # Keycloak masks the password on read, so compare everything else live and
+    # detect password changes through the stamp hash.
+    keycloak_smtp_needs_update: >-
+      {{ (keycloak_smtp_live | dict2items | rejectattr('key', 'equalto', 'password') | items2dict)
+         != (keycloak_smtp_config | dict2items | rejectattr('key', 'equalto', 'password') | items2dict)
+         or keycloak_smtp_stamp_current != keycloak_smtp_hash }}
+  vars:
+    keycloak_smtp_live: "{{ (keycloak_smtp_current.stdout | from_json).smtpServer | default({}) }}"
+    keycloak_smtp_stamp_current: "{{ (keycloak_smtp_stamp.content | default('') | b64decode | trim) }}"
+  no_log: true
+
+- name: Update SMTP settings
+  ansible.builtin.command:
+    argv:
+      - docker
+      - exec
+      - -i
+      - -e
+      - KCADM_USER
+      - -e
+      - KCADM_PW
+      - "{{ keycloak_smtp_container.stdout | trim }}"
+      - bash
+      - -c
+      - >-
+        {{ keycloak_smtp_kcadm }} update realms/{{ keycloak_realm }} -f -
+        --no-config --server {{ keycloak_smtp_server_url }} --realm master
+        --user "$KCADM_USER" --password "$KCADM_PW"
+    expand_argument_vars: false
+    # Realm representation fragment read from stdin, so the SMTP password is
+    # not visible in the process list either.
+    stdin: "{{ {'smtpServer': keycloak_smtp_config} | to_json }}"
+  environment:
+    KCADM_USER: "{{ keycloak_admin_user }}"
+    KCADM_PW: "{{ keycloak_admin_password }}"
+  when: keycloak_smtp_needs_update | bool
+  changed_when: true
+  no_log: true
+
+- name: Write stamp of applied SMTP config
+  ansible.builtin.copy:
+    dest: "{{ keycloak_smtp_stamp_file }}"
+    content: "{{ keycloak_smtp_hash }}\n"
+    owner: root
+    group: root
+    mode: "0600"

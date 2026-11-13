@@ -1,0 +1,45 @@
+---
+# apt can be locked for a while on first boot (cloud-init, unattended-upgrades),
+# hence the generous lock_timeout and retries.
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+    lock_timeout: 600
+  register: common_apt_cache
+  retries: 5
+  delay: 30
+  until: common_apt_cache is succeeded
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ common_packages }}"
+    state: present
+    lock_timeout: 600
+  register: common_apt_install
+  retries: 5
+  delay: 30
+  until: common_apt_install is succeeded
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ common_timezone }}"
+  when: common_timezone | length > 0
+
+- name: Configure periodic unattended upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      // Managed by Ansible
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+      APT::Periodic::AutocleanInterval "7";
+
+- name: Enable unattended-upgrades service
+  ansible.builtin.systemd_service:
+    name: unattended-upgrades
+    enabled: true
+    state: started

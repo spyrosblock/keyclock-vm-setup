@@ -1,0 +1,15 @@
+---
+certbot_cert_dir: "/etc/letsencrypt/live/{{ domain }}"
+# Compose commands used as certbot hooks. They are written to the renewal
+# config, so certbot.timer renewals free port 80 and restart nginx (which also
+# makes nginx load the renewed certificate). "|| true" keeps the hooks from
+# failing before the stack exists (first issuance).
+certbot_compose_cmd: "docker compose -p {{ compose_project_name }} -f {{ stack_dir }}/docker-compose.yml"
+certbot_pre_hook: "{{ certbot_compose_cmd }} stop nginx || true"
+certbot_post_hook: "{{ certbot_compose_cmd }} start nginx || true"
+# How long to wait for the domain to resolve (to this VM) before giving up;
+# the next ansible-pull run retries anyway.
+certbot_dns_retries: 30
+certbot_dns_delay: 20
+# Set to true to issue against the Let's Encrypt staging CA while testing.
+certbot_staging: false

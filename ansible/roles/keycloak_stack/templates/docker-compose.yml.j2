@@ -1,0 +1,88 @@
+# {{ ansible_managed }}
+name: {{ compose_project_name }}
+
+services:
+  postgres:
+    image: {{ postgres_image }}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      # Only applied when the data volume is initialised; rotating the secret
+      # later also requires an ALTER USER inside the database.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  keycloak:
+    image: {{ keycloak_image }}
+    # Plain `start` (no custom optimized image): build options such as KC_DB /
+    # KC_HEALTH_ENABLED trigger an automatic re-augmentation on boot.
+    command: ["start"]
+    restart: unless-stopped
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HOSTNAME: https://{{ domain }}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      # Temporary bootstrap admin: only created on first start, when the master
+      # realm has no admin yet. Changing the secret afterwards does NOT change
+      # this user's password.
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    # The image has no curl/wget; probe the management port (9000) with bash.
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q '"status": "UP"' <&3
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 120s
+
+  nginx:
+    image: {{ nginx_image }}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - keycloak
+    networks:
+      - frontend
+
+networks:
+  # postgres is only reachable from keycloak and has no outbound access.
+  backend:
+    internal: true
+  frontend: {}
+
+volumes:
+  postgres_data: {}

@@ -1,0 +1,74 @@
+---
+# - Values in .env are single-quoted (taken literally by Compose), so a "'" or
+#   newline in a secret cannot be represented.
+# - Keycloak (SmallRye config) expands "${...}" inside KC_* values, so a "${"
+#   in a password silently changes it (DB login / admin login then fail).
+# Fail early with a clear message instead of deploying a broken stack.
+- name: Assert secrets are safe for .env and Keycloak config
+  ansible.builtin.assert:
+    # Only expressions are echoed on failure, never the secret values.
+    that:
+      - "\"'\" not in postgres_password"
+      - "'\\n' not in postgres_password"
+      - "'${' not in postgres_password"
+      - "\"'\" not in keycloak_admin_password"
+      - "'\\n' not in keycloak_admin_password"
+      - "'${' not in keycloak_admin_password"
+    fail_msg: >-
+      postgres-password / keycloak-admin-password must not contain a single
+      quote, a newline or the sequence "${"
+    quiet: true
+
+- name: Create stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - "{{ stack_dir }}"
+    - "{{ stack_dir }}/nginx"
+    - "{{ stack_dir }}/nginx/conf.d"
+
+- name: Template stack environment file (secrets)
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ stack_dir }}/.env"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Template docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ stack_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: "0640"
+
+# The nginx config is bind-mounted, so Compose does not notice changes to it.
+- name: Template nginx site config
+  ansible.builtin.template:
+    src: nginx/keycloak.conf.j2
+    dest: "{{ stack_dir }}/nginx/conf.d/keycloak.conf"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart nginx
+
+# Changes to docker-compose.yml or .env change the resolved service config,
+# which Compose detects (recreate: auto) and recreates only affected services.
+# Stopped containers (e.g. nginx after a failed certbot post-hook) are started.
+- name: Bring up the Keycloak stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ stack_dir }}"
+    project_name: "{{ compose_project_name }}"
+    state: present
+    pull: missing
+    recreate: auto
+    remove_orphans: true
+
+- name: Apply pending nginx restart
+  ansible.builtin.meta: flush_handlers

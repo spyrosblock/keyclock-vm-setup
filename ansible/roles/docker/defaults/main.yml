@@ -1,0 +1,24 @@
+---
+docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+docker_apt_key_path: /etc/apt/keyrings/docker.asc
+docker_apt_repo_url: https://download.docker.com/linux/ubuntu
+docker_apt_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+# Distro packages that conflict with Docker CE (absent on a fresh cloud image).
+docker_conflicting_packages:
+  - docker.io
+  - docker-doc
+  - docker-compose
+  - docker-compose-v2
+  - podman-docker
+  - containerd
+  - runc
+docker_log_max_size: 10m
+docker_log_max_file: "3"

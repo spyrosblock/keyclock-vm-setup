@@ -1,0 +1,32 @@
+---
+# Defaults for the Keycloak VM. Anything in /etc/keycloak-setup/vars.yml
+# (passed with -e) takes precedence over these.
+
+# --- Container images (pinned; bump deliberately) ----------------------------
+keycloak_image: quay.io/keycloak/keycloak:26.8.2
+postgres_image: postgres:17.12-alpine
+nginx_image: nginx:1.30.6-alpine
+
+# --- Stack layout --------------------------------------------------------------
+stack_dir: /opt/keycloak
+compose_project_name: keycloak
+
+# --- Keycloak --------------------------------------------------------------------
+keycloak_admin_user: admin
+keycloak_realm: master
+keycloak_db_name: keycloak
+keycloak_db_user: keycloak
+
+# --- SMTP (Azure Communication Services) -----------------------------------------
+smtp_host: smtp.azurecomm.net
+smtp_port: 587
+smtp_from_display_name: Keycloak
+
+# --- Secrets ----------------------------------------------------------------------
+# Populated at runtime by the azure_keyvault role (fact azure_keyvault_secrets,
+# keyed by Key Vault secret name). These aliases are evaluated lazily, so they
+# only resolve after that role has run.
+postgres_password: "{{ azure_keyvault_secrets['postgres-password'] }}"
+keycloak_admin_password: "{{ azure_keyvault_secrets['keycloak-admin-password'] }}"
+smtp_username: "{{ azure_keyvault_secrets['smtp-username'] }}"
+smtp_password: "{{ azure_keyvault_secrets['smtp-password'] }}"

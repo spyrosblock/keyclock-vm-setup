@@ -1,0 +1,36 @@
+---
+# Entry point for ansible-pull on the Keycloak VM.
+#
+#   ansible-pull -U <repo_url> -C <branch> -d /opt/keycloak-setup/repo \
+#     -i localhost, -e @/etc/keycloak-setup/vars.yml ansible/site.yml
+#
+# Runs as root on the VM itself. Every role is idempotent so the systemd timer
+# can re-run it safely; a failed run (DNS not propagated yet, Key Vault RBAC
+# not effective yet, ...) is simply retried on the next timer tick.
+- name: Configure Keycloak VM
+  hosts: all
+  connection: local
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Assert required extra vars are present
+      ansible.builtin.assert:
+        that:
+          - key_vault_name | default('') | length > 0
+          - domain | default('') | length > 0
+          - letsencrypt_email | default('') | length > 0
+          - smtp_host | default('') | length > 0
+          - smtp_from | default('') | length > 0
+        fail_msg: >-
+          Missing extra vars. Expected key_vault_name, domain, letsencrypt_email,
+          smtp_host, smtp_port, smtp_from (see /etc/keycloak-setup/vars.yml).
+        quiet: true
+
+  roles:
+    - role: common
+    - role: docker
+    - role: azure_keyvault
+    - role: certbot
+    - role: keycloak_stack
+    - role: keycloak_smtp

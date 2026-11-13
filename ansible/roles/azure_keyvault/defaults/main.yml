@@ -1,0 +1,13 @@
+---
+azure_keyvault_imds_token_url: >-
+  http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net
+azure_keyvault_api_version: "7.4"
+azure_keyvault_secret_names:
+  - postgres-password
+  - keycloak-admin-password
+  - smtp-username
+  - smtp-password
+# Role assignments on a freshly created vault/identity can take several minutes
+# to become effective, so keep retrying for ~10 minutes per secret.
+azure_keyvault_retries: 20
+azure_keyvault_delay: 30
