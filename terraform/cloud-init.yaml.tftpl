@@ -1,0 +1,109 @@
+#cloud-config
+# Rendered by Terraform (templatefile). Literal "$${" / "%%{" must be escaped.
+# Bootstraps the VM and hands over to ansible-pull, which converges the box from
+# the Git repo now and every 30 minutes afterwards.
+
+package_update: true
+package_upgrade: true
+
+apt:
+  sources:
+    ansible:
+      # The PPA "ansible" package bundles the community collections
+      # (community.general, community.docker, ansible.posix, ...).
+      source: "ppa:ansible/ansible"
+
+packages:
+  - git
+  - software-properties-common
+  - ansible
+
+write_files:
+  # Non-secret settings for the playbook. Secrets are read from Key Vault by
+  # the playbook using the VM's managed identity.
+  - path: /etc/keycloak-setup/vars.yml
+    owner: root:root
+    permissions: "0644"
+    content: ${jsonencode(vars_yaml)}
+
+  - path: /usr/local/sbin/keycloak-ansible-pull
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Runs ansible-pull against the setup repo. Used by cloud-init (first
+      # boot) and by ansible-pull.service (timer). A lock prevents overlap.
+      set -uo pipefail
+      export HOME=/root
+      export PYTHONUNBUFFERED=1
+      export ANSIBLE_NOCOLOR=1
+
+      exec 9>/run/keycloak-ansible-pull.lock
+      if ! flock -n 9; then
+        echo "$(date -Is) ansible-pull already running, skipping" >>/var/log/ansible-pull.log
+        exit 0
+      fi
+
+      mkdir -p /opt/keycloak-setup
+      {
+        echo "===== $(date -Is) ansible-pull start ====="
+        ansible-pull \
+          -U '${repo_url}' \
+          -C '${repo_branch}' \
+          -d /opt/keycloak-setup/repo \
+          -i localhost, \
+          -e @/etc/keycloak-setup/vars.yml \
+          ansible/site.yml
+        rc=$?
+        echo "===== $(date -Is) ansible-pull finished rc=$rc ====="
+        exit $rc
+      } >>/var/log/ansible-pull.log 2>&1
+
+  - path: /etc/systemd/system/ansible-pull.service
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Converge Keycloak host with ansible-pull
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/keycloak-ansible-pull
+      TimeoutStartSec=1h
+
+  - path: /etc/systemd/system/ansible-pull.timer
+    owner: root:root
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Run ansible-pull every 30 minutes
+
+      [Timer]
+      OnBootSec=5min
+      OnUnitActiveSec=30min
+      RandomizedDelaySec=2min
+
+      [Install]
+      WantedBy=timers.target
+
+  - path: /etc/logrotate.d/ansible-pull
+    owner: root:root
+    permissions: "0644"
+    content: |
+      /var/log/ansible-pull.log {
+        weekly
+        rotate 8
+        compress
+        missingok
+        notifempty
+        copytruncate
+      }
+
+runcmd:
+  - [systemctl, daemon-reload]
+  # Enable the timer first: it keeps retrying (DNS, Key Vault RBAC propagation,
+  # Let's Encrypt) even if the first run below fails.
+  - [systemctl, enable, --now, ansible-pull.timer]
+  - [/usr/local/sbin/keycloak-ansible-pull]

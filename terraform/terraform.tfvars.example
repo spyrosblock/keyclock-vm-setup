@@ -1,0 +1,27 @@
+# Copy to terraform.tfvars (gitignored) and adjust.
+
+subscription_id   = "00000000-0000-0000-0000-000000000000"
+letsencrypt_email = "you@example.com"
+
+# location = "westeurope"
+# prefix   = "kc"
+# vm_size  = "Standard_B2s"
+
+# SSH: key content takes precedence over the path.
+# admin_ssh_public_key      = "ssh-ed25519 AAAA... you@laptop"
+# admin_ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+# Strongly recommended: restrict SSH to your own IP ([] = no SSH rule at all).
+# ssh_allowed_cidrs = ["203.0.113.10/32"]
+
+# Leave domain empty to use <dns_label>.<location>.cloudapp.azure.com.
+# dns_label = "my-keycloak"
+# domain    = "auth.example.com" # requires an A record -> public_ip output
+
+# repo_url    = "https://github.com/spyrosblock/keyclock-vm-setup.git"
+# repo_branch = "main"
+
+# tags = {
+#   project    = "keycloak"
+#   managed_by = "terraform"
+# }

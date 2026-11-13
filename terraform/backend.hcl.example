@@ -1,0 +1,8 @@
+# Copy to backend.hcl (gitignored) and fill in the values printed by
+# ../bootstrap/tfstate.sh, then:
+#   terraform init -backend-config=backend.hcl
+resource_group_name  = "tfstate-rg"
+storage_account_name = "tfstatexxxxxxxx"
+container_name       = "tfstate"
+key                  = "keycloak-vm.tfstate"
+use_azuread_auth     = true
