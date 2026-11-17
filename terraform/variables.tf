@@ -9,9 +9,9 @@ variable "subscription_id" {
 }
 
 variable "location" {
-  description = "Azure region for all regional resources."
+  description = "Azure region for all regional resources. swedencentral is used because this subscription cannot create VMs in westeurope/northeurope."
   type        = string
-  default     = "westeurope"
+  default     = "swedencentral"
 }
 
 variable "prefix" {
@@ -26,9 +26,9 @@ variable "prefix" {
 }
 
 variable "vm_size" {
-  description = "VM size. Keycloak + Postgres needs ~4 GiB RAM; Standard_B2s is the practical minimum."
+  description = "VM size. Keycloak + Postgres needs ~4 GiB RAM. Must be offered in var.location AND have core quota on the subscription (check: az vm list-usage -l <location>)."
   type        = string
-  default     = "Standard_B2s"
+  default     = "Standard_D2als_v6"
 }
 
 variable "os_disk_type" {

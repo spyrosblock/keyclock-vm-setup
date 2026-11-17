@@ -23,6 +23,9 @@ Internet ──443/80──> nginx ──frontend net──> keycloak:8080 ─�
 - Deployer needs **Owner** (or User Access Administrator + Contributor) on the subscription
   and permission to create Entra app registrations
 - This repo must be reachable by the VM (public, or adjust `repo_url`)
+- Defaults: VM in **swedencentral** on **Standard_D2als_v6** (2 vCPU / 4 GiB); Terraform state in
+  `kc-tfstate-rg` (northeurope). If you change `location`/`vm_size`, the size must be both offered
+  in the region and within your core quota: `az vm list-usage -l <location> -o table`
 
 ## Deploy
 

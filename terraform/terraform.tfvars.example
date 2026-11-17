@@ -3,9 +3,9 @@
 subscription_id   = "00000000-0000-0000-0000-000000000000"
 letsencrypt_email = "you@example.com"
 
-# location = "westeurope"
+# location = "swedencentral"
 # prefix   = "kc"
-# vm_size  = "Standard_B2s"
+# vm_size  = "Standard_D2als_v6" # 2 vCPU / 4 GiB
 
 # SSH: key content takes precedence over the path.
 # admin_ssh_public_key      = "ssh-ed25519 AAAA... you@laptop"

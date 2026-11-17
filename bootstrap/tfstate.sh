@@ -3,7 +3,7 @@
 #
 # Usage:
 #   az login
-#   [SUBSCRIPTION_ID=...] [LOCATION=westeurope] [STATE_RG=tfstate-rg] \
+#   [SUBSCRIPTION_ID=...] [LOCATION=northeurope] [STATE_RG=kc-tfstate-rg] \
 #   [STATE_SA=tfstate<unique>] [STATE_CONTAINER=tfstate] [STATE_KEY=keycloak-vm.tfstate] \
 #   [WRITE_BACKEND_FILE=true] ./bootstrap/tfstate.sh
 #
@@ -12,8 +12,8 @@
 # name is generated.
 set -euo pipefail
 
-LOCATION="${LOCATION:-westeurope}"
-STATE_RG="${STATE_RG:-tfstate-rg}"
+LOCATION="${LOCATION:-northeurope}"
+STATE_RG="${STATE_RG:-kc-tfstate-rg}"
 STATE_CONTAINER="${STATE_CONTAINER:-tfstate}"
 STATE_KEY="${STATE_KEY:-keycloak-vm.tfstate}"
 WRITE_BACKEND_FILE="${WRITE_BACKEND_FILE:-false}"
